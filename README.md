@@ -34,7 +34,14 @@ prune-executions.sh --keep 20 --finished-days 60
 ```
 
 Deletes go through `DELETE /api/v1/executions?iri=<execution IRI>` (the
-frontend has no DELETE on `/resources/executions/<id>`). Exit codes: 0 ok,
+frontend has no DELETE on `/resources/executions/<id>`).
+
+**Auth:** the servers put nginx Basic auth in front of `localhost:8080`.
+Give the token (base64 of `user:password`) in a root-only file with
+`--token-file` (`chmod 600`), or in `LP_TOKEN`. It is deliberately not a
+command-line argument: arguments show up in `ps` and in the crontab. The
+script hands the header to curl through a file descriptor, so it is not in
+curl's arguments either. `--netrc FILE` works too. Exit codes: 0 ok,
 1 usage, 2 the list could not be fetched or parsed, 3 some deletes failed.
 Output is one timestamped line per action, suitable for a cron log.
 
@@ -44,7 +51,7 @@ Output is one timestamped line per action, suitable for a cron log.
 2. Replace both QA cron lines with one daily run, logging to a file:
 
    ```
-   15 3 * * *  root  /opt/linkedpipes-utils/prune-executions.sh >> /var/log/lp-prune.log 2>&1
+   15 3 * * *  root  /opt/linkedpipes-utils/prune-executions.sh --token-file /etc/linkedpipes-utils/token >> /var/log/lp-prune.log 2>&1
    ```
 
 3. After a week on QA, the same on PROD. Then delete

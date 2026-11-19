@@ -16,7 +16,10 @@
 #   --keep N             newest executions kept per pipeline (default 10)
 #   --finished-days N    delete finished executions older than N days (30)
 #   --failed-days N      delete failed/cancelled/... older than N days (90)
-#   --netrc FILE         curl netrc file for Basic auth (default: none)
+#   --token-file FILE    file holding the Basic auth token (base64 user:pass)
+#                        for the nginx in front of LinkedPipes; or set
+#                        LP_TOKEN. Not an argument: it would show in ps.
+#   --netrc FILE         curl netrc file instead (default: none)
 #   --dry-run            print what would be deleted, delete nothing
 #   --input FILE         read the execution list from FILE instead of the
 #                        server (testing; implies --dry-run)
@@ -29,6 +32,7 @@ KEEP=10
 FINISHED_DAYS=30
 FAILED_DAYS=90
 NETRC=""
+TOKEN_FILE=""
 DRY_RUN=0
 INPUT=""
 
@@ -42,6 +46,7 @@ while [ $# -gt 0 ]; do
     --finished-days) FINISHED_DAYS="${2:?}"; shift 2 ;;
     --failed-days) FAILED_DAYS="${2:?}"; shift 2 ;;
     --netrc) NETRC="${2:?}"; shift 2 ;;
+    --token-file) TOKEN_FILE="${2:?}"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     --input) INPUT="${2:?}"; DRY_RUN=1; shift 2 ;;
     -h|--help) usage ;;
@@ -59,13 +64,26 @@ done
 URL="${URL%/}"
 CURL=(curl -sS --fail --max-time 60)
 [ -n "$NETRC" ] && CURL+=(--netrc-file "$NETRC")
+TOKEN="${LP_TOKEN:-}"
+if [ -n "$TOKEN_FILE" ]; then
+  [ -r "$TOKEN_FILE" ] || { echo "cannot read $TOKEN_FILE" >&2; exit 1; }
+  TOKEN=$(tr -d ' \r\n' < "$TOKEN_FILE")
+fi
+# The header goes to curl through a file descriptor, never through argv.
+lp_curl() {
+  if [ -n "$TOKEN" ]; then
+    "${CURL[@]}" -H @<(printf 'Authorization: Basic %s\n' "$TOKEN") "$@"
+  else
+    "${CURL[@]}" "$@"
+  fi
+}
 
 log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
 
 if [ -n "$INPUT" ]; then
   JSON=$(cat "$INPUT")
 else
-  JSON=$("${CURL[@]}" -H "Accept: application/ld+json" "$URL/resources/executions") \
+  JSON=$(lp_curl -H "Accept: application/ld+json" "$URL/resources/executions") \
     || { log "ERROR cannot list executions from $URL"; exit 2; }
 fi
 
@@ -134,7 +152,7 @@ while IFS=$'\t' read -r iri pipeline status start age; do
   fi
   # The frontend only routes execution deletes via /api/v1 (monitor
   # DELETE /executions/?iri=); a DELETE on the execution IRI itself 404s.
-  if "${CURL[@]}" -o /dev/null -X DELETE -G --data-urlencode "iri=$iri" "$URL/api/v1/executions"; then
+  if lp_curl -o /dev/null -X DELETE -G --data-urlencode "iri=$iri" "$URL/api/v1/executions"; then
     log "deleted $iri ($status, $age)"
   else
     log "ERROR delete failed: $iri"
