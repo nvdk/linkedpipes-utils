@@ -1,0 +1,5 @@
+# Local secrets: never commit (this repo is public).
+token
+*.token
+.netrc
+netrc
